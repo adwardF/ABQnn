@@ -1,126 +1,165 @@
-# ABQnn - Abaqus Neural Network Integration
+# ABQnn - PyTorch Neural Network Integration for Abaqus UMAT
 
-本项目实现了在Abaqus用户材料子程序(UMAT)中调用PyTorch Script模型的功能，为有限元分析提供机器学习驱动的材料本构模型。
+A C++/Fortran library that enables using PyTorch neural network constitutive models within Abaqus finite element simulations through the UMAT (User Material) interface.
 
-## 项目结构
+## Features
+
+- **Neural Network Constitutive Models**: Use pre-trained TorchScript models for hyperelastic material response
+- **Thread-Safe Caching**: Efficient model loading with reader-writer locks for parallel simulations
+- **Fortran-C Interoperability**: Seamless integration with Abaqus UMAT via `iso_c_binding`
+- **Cross-Platform**: Windows support with extensible design for Linux/macOS
+
+## Project Structure
 
 ```
 ABQnn/
-├── UMAT_allmodels.for          # Fortran UMAT子程序主文件
-├── src/
-│   ├── UMAT_auxlib.cpp         # C++辅助库，负责DLL加载
-│   └── UMAT_pt_caller.cpp      # C++ PyTorch调用器，执行神经网络推理
-└── utils/
-    ├── export_models.py        # 从Abaqus ODB导出数据的Python脚本
-    └── gen_material_models.py  # 生成多个材料模型作业的Python脚本
+├── CMakeLists.txt          # Root CMake configuration
+├── cmake/                  # CMake modules
+│   ├── FindLibTorch.cmake  # LibTorch finder
+│   ├── config.h.in         # Config header template
+│   └── ABQnnConfig.cmake.in
+├── include/                # Public headers
+│   ├── umat_pt_caller.h    # PyTorch caller API
+│   └── umat_auxlib.h       # Auxiliary library API
+├── src/                    # Source files
+│   ├── CMakeLists.txt
+│   ├── UMAT_pt_caller.cpp  # PyTorch model inference
+│   └── UMAT_auxlib.cpp     # DLL loading and initialization
+├── tests/                  # Test files
+│   ├── CMakeLists.txt
+│   ├── UMAT_fortest.f90    # Fortran test
+│   └── pt_caller_test.cpp  # C++ test
+├── models/                 # PyTorch models (.pt files)
+├── fortran/                # UMAT Fortran files
+│   └── UMAT_base.for       # Main UMAT subroutine
+└── local/                  # Local development files
+    └── allmodels/          # Pre-trained models
 ```
 
-## 核心组件
+## Requirements
 
-### 1. Fortran UMAT子程序 (`UMAT_allmodels.for`)
-- 主要的Abaqus用户材料子程序接口
-- 通过iso_c_binding绑定调用C++函数
-- 根据材料名称自动加载对应的PyTorch Script模型文件
-- 处理变形梯度张量、应力和刚度矩阵的传递
+- **CMake** >= 3.18
+- **C++ Compiler** with C++17 support (MSVC, GCC, Clang)
+- **LibTorch** (PyTorch C++ distribution)
+- **Fortran Compiler** (Intel ifx or gfortran) - for tests
+- **Abaqus** 2021+ (for deployment)
 
-### 2. C++组件
+## Building
 
-#### `UMAT_auxlib.cpp` - 动态库加载器
-- 负责加载PyTorch相关的DLL文件
-- 实现线程安全的初始化机制
-- 提供错误处理和调试输出功能
+### Configure
 
-#### `UMAT_pt_caller.cpp` - PyTorch模型调用器
-- 实现PyTorch Script模型的加载和推理
-- 使用线程安全的模型缓存机制
-- 处理输入/输出张量的格式转换
-- 支持以下输入输出：
-  - 输入：变形梯度张量 F [3×3]
-  - 输出：应变能密度 ψ，Cauchy应力 [6]，刚度矩阵 [6×6]
-
-### 3. Python工具脚本
-
-#### `export_models.py` - 数据导出工具
-从Abaqus ODB文件中导出仿真数据用于神经网络训练。
-
-**使用方法:**
 ```bash
-abaqus python export_models.py <jobname_pattern> <output_dir>
+# Create build directory
+mkdir build && cd build
+
+# Configure with CMake (all paths are configurable)
+cmake .. -DLIBTORCH_PATH="D:/Library/libtorch" \
+         -DABAQUS_LIB_PATH="D:/SIMULIA/EstProducts/2021/win_b64/code/lib" \
+         -DMODEL_PATH="D:/path/to/models" \
+         -DLOG_PATH="D:/path/to/logs"
 ```
 
-**功能:**
-- 批量处理符合模式的ODB文件
-- 导出节点坐标、网格连接、应力、应变和位移等数据
-- 输出NumPy格式的数组文件和JSON格式的网格文件
+### Build Options
 
-#### `gen_material_models.py` - 批量作业生成器
-在Abaqus CAE中批量创建使用不同PyTorch模型的材料和作业。
+| Option | Default | Description |
+|--------|---------|-------------|
+| `BUILD_SHARED_LIBS` | ON | Build shared libraries |
+| `BUILD_TESTS` | ON | Build test executables |
+| `ENABLE_DEBUG_OUTPUT` | OFF | Enable debug logging to files |
 
-**使用方法:**
+### Configurable Paths
+
+All paths are configured at compile time and embedded into the binaries:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LIBTORCH_PATH` | Auto-detected | Path to LibTorch installation |
+| `LIBTORCH_LIB_PATH` | `${LIBTORCH_PATH}/lib` | LibTorch DLL directory (runtime) |
+| `ABAQUS_LIB_PATH` | Platform-specific | Path to Abaqus library directory |
+| `MODEL_PATH` | `${PROJECT}/models` | Default path for PyTorch models |
+| `LOG_PATH` | `${PROJECT}/log` | Debug log output directory |
+
+These paths are written to `abqnn_config.h` during CMake configuration.
+
+### Compile
+
 ```bash
-# 在Abaqus CAE中运行
-abaqus python gen_material_models.py
+# Build
+cmake --build . --config Release
+
+# Install
+cmake --install . --config Release
 ```
 
-**功能:**
-- 交互式输入材料和作业参数
-- 批量创建材料定义
-- 生成作业输入文件或直接提交计算
+### Visual Studio
 
-## 安装和使用
+```powershell
+# Configure for Visual Studio
+cmake -G "Visual Studio 17 2022" -A x64 ..
 
-### 环境要求
-- Abaqus 2020或更高版本
-- PyTorch C++ API (LibTorch)
-- Visual Studio编译器（用于编译C++组件）
-- Python环境（Abaqus内置或独立）
+# Build
+cmake --build . --config Release
+```
 
-### 编译步骤
-1. 确保PyTorch C++库已正确安装
-2. 编译C++组件为动态链接库
-3. 将UMAT Fortran文件和相关DLL放置在Abaqus可访问的路径；修改.cpp文件中需要用户修改的若干路径。
-4. 将makefile中的Abaqus编译所用的具体lib文件路径修改为真实路径；并修改对应的与编译平台相关的Abaqus控制文件（例：Windows平台的\SMA\site\win86_64.env文件），只需要再link_*部分加入所编译的.lib文件即可。
+## Usage
 
-### 使用流程
+### In Abaqus UMAT
 
-1. **准备PyTorch模型**
-   - 将训练好的PyTorch模型导出为TorchScript格式(.pt文件)
-   - 模型应接受变形梯度张量并输出应力和刚度矩阵
+```fortran
+subroutine UMAT(STRESS, STATEV, DDSDDE, ...)
+    use iso_c_binding
+    
+    interface
+        function invoke_pt(ptname, F, psi, cauchy, C66) result(err) bind(C)
+            ! ... interface definition
+        end function
+    end interface
+    
+    ! Call neural network model
+    err = invoke_pt("path/to/model.pt"//c_null_char, DFGRD1, SSE, STRESS, DDSDDE)
+end subroutine
+```
 
-2. **设置材料**
-   - 在Abaqus CAE中创建User Material
-   - 材料名称应与对应的.pt文件名匹配
+### PyTorch Model Requirements
 
-3. **运行分析**
-   - 在作业设置中指定UMAT子程序路径
-   - 提交作业进行计算
+Your TorchScript model must accept a 3x3 deformation gradient tensor and return:
+1. **psi** (scalar): Strain energy density
+2. XXX **Cauchy6** (6-vector): Cauchy stress in Voigt notation [σ11, σ22, σ33, σ12, σ13, σ23]
+3. XXX **DDSDDE** (6x6 matrix): Material tangent stiffness
 
-4. **数据处理**
-   - 使用`export_models.py`从结果ODB文件中提取数据
-   - 数据可用于进一步的分析或模型训练
+## API Reference
 
-## 模型接口规范
+### `pt_module_invoke`
 
-PyTorch模型应遵循以下输入输出规范：
+```c
+int pt_module_invoke(
+    char* module_filename,  // Path to .pt file
+    double* F,              // Deformation gradient [3x3]
+    double* psi,            // Output: strain energy
+    double* Cauchy,        // Output: Cauchy stress
+    double* DDSDDE          // Output: tangent
+);
+```
 
-**输入:**
-- 变形梯度张量 F: `torch.Tensor [ 3, 3]`
+### `invoke_pt`
 
-**输出:**
-- 应变能密度 ψ: `torch.Tensor [1]`,或者`double`值。
-- Cauchy应力: `torch.Tensor [6]`
-- 材料切线刚度矩阵（注：参考Abaqus UMAT子程序相关文档；对应Jaumann客观率）: `torch.Tensor [batch_size, 6, 6]`
-- 以上应力、刚度矩阵均采用与Abaqus相同的指标顺序约定，即：0对应1方向正应力/应变，3对应1-2方向剪切应力、应变
+Fortran-callable wrapper that handles DLL initialization.
 
-## 注意事项
+## Error Codes
 
-- 确保PyTorch模型文件路径正确配置
-- C++组件需要正确链接LibTorch库
-- 注意线程安全，特别是在并行计算环境中
-- 调试模式可通过定义`DEBUG`宏来启用
+| Code | Description |
+|------|-------------|
+| 0 | Success |
+| 1 | Failed to set DLL directory |
+| 2 | Failed to load UMAT_pt_caller.dll |
+| 3 | Failed to get DLL handle |
+| 4 | Failed to get function address |
+| 101 | Failed to load TorchScript module |
+| 102 | Failed to cache module |
+| 105 | Inference or conversion error |
+| 106 | Unexpected output type |
+| 110 | Invalid input (null pointer) |
 
-## 故障排除
+## License
 
-- 如果遇到DLL加载错误，检查LibTorch库路径和依赖项
-- 确认PyTorch模型文件格式正确且可被加载
-- 检查Abaqus用户子程序的编译环境配置
+MIT License - see LICENSE file for details.

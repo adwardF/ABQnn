@@ -1,0 +1,53 @@
+# IDE and editor files
+.vscode/
+.vs/
+*.user
+*.suo
+.idea/
+
+# Local development files
+local/
+models/
+log/
+scratch/
+
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# Compiled files
+*.obj
+*.o
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.exe
+*.pdb
+*.ilk
+*.exp
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+install_manifest.txt
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*~
+*.swp
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,29 @@
+{
+    "version": 8,
+    "configurePresets": [
+        {
+            "name": "main-config",
+            "displayName": "Main Configuration",
+            "description": "Sets NMake, build and install directory",
+            "generator": "NMake Makefiles",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "LIBTORCH_PATH": "D:\\hresearch\\multiscale\\.venv\\Lib\\site-packages\\torch",
+                "ABAQUS_LIB_PATH": "D:\\SIMULIA\\EstProducts\\2021\\win_b64\\code\\lib",
+                "MODEL_PATH": "D:\\hresearch\\ABQnn\\models",
+                "LOG_PATH": "D:\\hresearch\\ABQnn\\log",
+                "ENABLE_DEBUG_OUTPUT": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "main-build",
+            "description": "Build with main configure preset",
+            "displayName": "Main Build",
+            "configurePreset": "main-config",
+            "jobs": 4
+        }
+    ]
+}

@@ -8,29 +8,27 @@
 #include <ctime>
 #include <mutex>
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
-// #define DEBUG
+#include "umat_auxlib.h"
+#include "abqnn_config.h"
 
-extern "C"
-{
-    int invoke_pt(char *, double*,
-                  double*,double*,
-                  double*);
-}
-
+// Thread safety for initialization - most efficient approach
 static std::once_flag init_flag;
 static int initialization_error = 0;
-typedef int (*pt_module_invoke_func)(char*, double*, double*, double*, double*);
-pt_module_invoke_func pt_module_invoke_handle = nullptr;
+typedef int (*pt_module_invoke_func)(const char*, const double*, const double*, int, double*, double*, double*);
+static pt_module_invoke_func pt_module_invoke_handle = nullptr;
 
 int try_load_dll(const char *dll_name)
 {
+    // First check if DLL is already loaded
     HMODULE existing_handle = GetModuleHandleA(dll_name);
     if (existing_handle != NULL)
     {
-        #ifdef DEBUG
-        fprintf(stderr, "DLL %s already loaded\n", dll_name); /* 替换为实际libtorch路径 */
+        #ifdef ENABLE_DEBUG_OUTPUT
+        fprintf(stderr, "DLL %s already loaded\n", dll_name);
         #endif
         return 0; // Already loaded
     }
@@ -42,7 +40,7 @@ int try_load_dll(const char *dll_name)
         if(error == ERROR_ALREADY_EXISTS) // 183
             return 0;
         
-        #ifdef DEBUG
+        #ifdef ENABLE_DEBUG_OUTPUT
         fprintf(stderr, "Failed to load %s: error code %lu", dll_name, error);
         switch(error) {
             case 2: fprintf(stderr, " (File not found)\n"); break;
@@ -56,7 +54,7 @@ int try_load_dll(const char *dll_name)
         return 1;
     }
     
-    #ifdef DEBUG
+    #ifdef ENABLE_DEBUG_OUTPUT
     fprintf(stderr, "Successfully loaded %s\n", dll_name);
     #endif
     return 0;
@@ -65,11 +63,16 @@ int try_load_dll(const char *dll_name)
 int initialize_library()
 {   
     // Note: This function is now called via std::call_once
-    #ifdef DEBUG
-    freopen("D:\\dev\\ABQnn\\auxlib_err.txt", "a", stderr); // Replace with actual path
+    #ifdef ENABLE_DEBUG_OUTPUT
+    
+    char log_file_path[MAX_PATH];
+    snprintf(log_file_path, MAX_PATH, "%s/auxlib_err.txt", ABQNN_LOG_PATH);
+    freopen(log_file_path, "a", stderr);
+
     time_t now = time(NULL);
     fprintf(stderr, "UMAT_auxlib.cpp: %s", ctime(&now));
     fprintf(stderr, "Starting library initialization...\n");
+    fprintf(stderr, "LibTorch lib path: %s\n", ABQNN_LIBTORCH_LIB_PATH);
     // Debug: Show current working directory
     char current_dir[MAX_PATH];
     if (GetCurrentDirectoryA(MAX_PATH, current_dir))
@@ -78,24 +81,25 @@ int initialize_library()
     }
     #endif
 
-    // Set DLL search paths - this is likely why torch_cpu.dll fails
-    if (!SetDllDirectoryA("D:\\Library\\libtorch\\lib\\")) /* Replace with actual path */
-    {
-        #ifdef DEBUG
-        fprintf(stderr, "Warning: Failed to set DLL directory(error=%lu)\n", GetLastError());
+    // Set DLL search paths using configured LibTorch path
+    if (!SetDllDirectoryA(ABQNN_LIBTORCH_LIB_PATH)) {
+        #ifdef ENABLE_DEBUG_OUTPUT
+        fprintf(stderr, "Warning: Failed to set DLL directory to %s (error=%lu)\n", 
+                ABQNN_LIBTORCH_LIB_PATH, GetLastError());
         #endif
         return 1;
     } else {
-        #ifdef DEBUG
-        fprintf(stderr, "Successfully set DLL directory\n");
+        #ifdef ENABLE_DEBUG_OUTPUT
+        fprintf(stderr, "Successfully set DLL directory to %s\n", ABQNN_LIBTORCH_LIB_PATH);
         #endif
     }
-    
+
+    /* try_load_dll("torch_cuda.dll"); */
     
     int ret = try_load_dll("UMAT_pt_caller.dll");
     if(ret)
     {
-        #ifdef DEBUG
+        #ifdef ENABLE_DEBUG_OUTPUT
         fprintf(stderr, "Failed to load UMAT_pt_caller.dll (ret=%d)\n", ret);
         #endif
         return 2;
@@ -104,7 +108,7 @@ int initialize_library()
     HMODULE dll = GetModuleHandleA("UMAT_pt_caller.dll");
     if(dll == NULL)
     {
-        #ifdef DEBUG
+        #ifdef ENABLE_DEBUG_OUTPUT
         fprintf(stderr, "Failed to get handle for UMAT_pt_caller.dll (error=%lu)\n", GetLastError());
         #endif
         return 3;
@@ -113,7 +117,7 @@ int initialize_library()
     pt_module_invoke_handle = (pt_module_invoke_func)GetProcAddress(dll, "pt_module_invoke");
     if(pt_module_invoke_handle == NULL)
     {
-        #ifdef DEBUG
+        #ifdef ENABLE_DEBUG_OUTPUT
         fprintf(stderr, "Failed to get function address for pt_module_invoke (error=%lu)\n", GetLastError());
         #endif
         return 4;
@@ -122,10 +126,10 @@ int initialize_library()
     return 0;
 }
 
-int invoke_pt(char *module_filename,
-              double *F, double *psi,
-              double *Cauchy6, double *DDSDDE)
-{   
+int invoke_pt(const char *module_filename,
+              const double *F, const double *mat_par, int n_mat_par,
+              double *psi, double *Cauchy, double *DDSDDE)
+{
     // Thread-safe, one-time initialization - no mutex overhead after first call
     std::call_once(init_flag, [&]() {
         initialization_error = initialize_library();
@@ -138,7 +142,7 @@ int invoke_pt(char *module_filename,
     }
     
     // Call the C function from UMAT_pt_caller.dll
-    int err = pt_module_invoke_handle(module_filename, F, psi, Cauchy6, DDSDDE);
+    int err = pt_module_invoke_handle(module_filename, F, mat_par, n_mat_par, psi, Cauchy, DDSDDE);
     
     return err;
 }
