@@ -148,6 +148,7 @@ int try_load_module(const char *module_filename,
         if (it != module_table.end())
         {
             out_module = &(it->second);
+            return 0;
         }
         else
         {
@@ -193,6 +194,7 @@ int try_load_module(const char *module_filename,
             }
         }
     }
+    return 0;
 }
 
 int readout_results(
