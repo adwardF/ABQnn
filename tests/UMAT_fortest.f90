@@ -21,7 +21,7 @@ interface
         character(c_char), dimension(*), intent(in) :: module_name
         real(c_double), dimension(3,3), intent(in) :: F
         real(c_double), dimension(*), intent(in) :: mat_par
-        integer(c_int), intent(in) :: n_mat_par
+        integer(c_int), intent(in), value :: n_mat_par
         real(c_double), intent(out) :: psi
         real(c_double), dimension(6), intent(out) :: cauchy6
         real(c_double), dimension(6,6), intent(out) :: DDSDDE
