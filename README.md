@@ -159,7 +159,3 @@ Fortran-callable wrapper that handles DLL initialization.
 | 105 | Inference or conversion error |
 | 106 | Unexpected output type |
 | 110 | Invalid input (null pointer) |
-
-## License
-
-MIT License - see LICENSE file for details.
