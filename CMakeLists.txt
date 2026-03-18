@@ -97,12 +97,12 @@ if(USE_SCCACHE)
     endif()
 endif()
 
-# Fortran UMAT file
-configure_file(
-    ${CMAKE_SOURCE_DIR}/fortran/UMAT_base.for.in
-    ${CMAKE_BINARY_DIR}/fortran/UMAT_base.for
-    @ONLY
-)
+# # Fortran UMAT file
+# configure_file(
+#     ${CMAKE_SOURCE_DIR}/fortran/UMAT_base.for.in
+#     ${CMAKE_BINARY_DIR}/fortran/UMAT_base.for
+#     @ONLY
+# )
 
 # -----------------------------------------------------------------------------
 # Build Libraries

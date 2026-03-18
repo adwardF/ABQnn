@@ -42,6 +42,27 @@ int invoke_pt(
     double* DDSDDE
 );
 
+/**
+ * @brief Invoke a PyTorch model from Fortran VUMAT with a batch of material points.
+ *
+ * The deformation gradient and stress arrays are passed in Fortran layout:
+ *   - defgradF(nblock, ndir+2*nshr)
+ *   - stressNew(nblock, ndir+nshr)
+ *
+ * @return int Error code (0 = success)
+ */
+int invoke_pt_vumat_batch(
+    const char* module_filename,
+    const double* defgradF,
+    int nblock,
+    int ndir,
+    int nshr,
+    const double* mat_par,
+    int n_mat_par,
+    double* enerInternNew,
+    double* stressNew
+);
+
 #ifdef __cplusplus
 }
 #endif

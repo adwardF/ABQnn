@@ -34,6 +34,21 @@ int readout_results(
     double *Cauchy,
     double *DDSDDE);
 
+int build_defgrad_batch_tensor(
+    const double *defgradF,
+    int nblock,
+    int ndir,
+    int nshr,
+    torch::Tensor &F_batch_tensor);
+
+int readout_vumat_batch_results(
+    const torch::jit::IValue &results,
+    int nblock,
+    int ndir,
+    int nshr,
+    double *enerInternNew,
+    double *stressNew);
+
 /*
 Arguments:
 F: double [3][3]
@@ -54,7 +69,17 @@ UMAT_PT_CALLER_API int pt_module_invoke(const char *module_filename,
 {
     if (!module_filename || !F || !psi || !Cauchy || !DDSDDE)
     {
-        return 110;
+        //return 110;
+        if (!module_filename)
+            return 123456;
+        else if(!F)
+            return 123457;
+        else if(!psi)
+            return 123458;
+        else if(!Cauchy)
+            return 123459;
+        else
+            return 114514;
     }
 
     std::string module_filename_str(module_filename);
@@ -112,6 +137,66 @@ UMAT_PT_CALLER_API int pt_module_invoke(const char *module_filename,
     }
 
     return 0;
+}
+
+UMAT_PT_CALLER_API int pt_module_invoke_vumat_batch(const char *module_filename,
+                                                    const double *defgradF,
+                                                    int nblock,
+                                                    int ndir,
+                                                    int nshr,
+                                                    const double *mat_par,
+                                                    int n_mat_par,
+                                                    double *enerInternNew,
+                                                    double *stressNew)
+{
+    if (!module_filename || !defgradF || !enerInternNew || !stressNew || nblock <= 0)
+    {
+        return 110;
+    }
+
+    if (!((ndir == 3 && nshr == 3) || (ndir == 3 && nshr == 1)))
+    {
+        return 111;
+    }
+
+    torch::jit::Module *mod_ptr = nullptr;
+    int mod_load_err = try_load_module(module_filename, mod_ptr);
+    if (mod_load_err != 0)
+    {
+        return mod_load_err;
+    }
+
+    torch::Tensor F_batch_tensor;
+    int tensor_build_err = build_defgrad_batch_tensor(defgradF, nblock, ndir, nshr, F_batch_tensor);
+    if (tensor_build_err != 0)
+    {
+        return tensor_build_err;
+    }
+
+    torch::Tensor mat_par_tensor;
+    if (mat_par && n_mat_par > 0)
+    {
+        mat_par_tensor = torch::from_blob((void *)mat_par, {n_mat_par}, torch::kDouble).contiguous();
+    }
+    else
+    {
+        mat_par_tensor = torch::empty({0}, torch::kDouble);
+    }
+
+    torch::jit::IValue results;
+    try
+    {
+        results = mod_ptr->forward({F_batch_tensor, mat_par_tensor});
+    }
+    catch (const std::exception &e)
+    {
+#ifdef ENABLE_DEBUG_OUTPUT
+        fprintf(stderr, "Error during VUMAT batch model inference: %s\n", e.what());
+#endif
+        return 105;
+    }
+
+    return readout_vumat_batch_results(results, nblock, ndir, nshr, enerInternNew, stressNew);
 }
 
 int try_load_module(const char *module_filename,
@@ -274,5 +359,143 @@ int readout_results(
 #endif
         return 105;
     }
+    return 0;
+}
+
+int build_defgrad_batch_tensor(
+    const double *defgradF,
+    int nblock,
+    int ndir,
+    int nshr,
+    torch::Tensor &F_batch_tensor)
+{
+    if (!defgradF || nblock <= 0)
+    {
+        return 110;
+    }
+
+    const int ndefgrad = ndir + 2 * nshr;
+
+    if (!((ndir == 3 && nshr == 3 && ndefgrad == 9) || (ndir == 3 && nshr == 1 && ndefgrad == 5)))
+    {
+        return 111;
+    }
+
+    auto defgrad_fortran = torch::from_blob((void *)defgradF, {ndefgrad, nblock}, torch::kDouble)
+                               .t()
+                               .contiguous();
+
+    auto options = torch::TensorOptions().dtype(torch::kDouble).device(torch::kCPU);
+    F_batch_tensor = torch::zeros({nblock, 3, 3}, options);
+
+    F_batch_tensor.index_put_({torch::indexing::Slice(), 0, 0}, defgrad_fortran.index({torch::indexing::Slice(), 0}));
+    F_batch_tensor.index_put_({torch::indexing::Slice(), 1, 1}, defgrad_fortran.index({torch::indexing::Slice(), 1}));
+    F_batch_tensor.index_put_({torch::indexing::Slice(), 2, 2}, defgrad_fortran.index({torch::indexing::Slice(), 2}));
+    F_batch_tensor.index_put_({torch::indexing::Slice(), 0, 1}, defgrad_fortran.index({torch::indexing::Slice(), 3}));
+    F_batch_tensor.index_put_({torch::indexing::Slice(), 1, 0}, defgrad_fortran.index({torch::indexing::Slice(), (ndir == 3 && nshr == 3) ? 6 : 4}));
+
+    if (ndir == 3 && nshr == 3)
+    {
+        F_batch_tensor.index_put_({torch::indexing::Slice(), 1, 2}, defgrad_fortran.index({torch::indexing::Slice(), 4}));
+        F_batch_tensor.index_put_({torch::indexing::Slice(), 2, 0}, defgrad_fortran.index({torch::indexing::Slice(), 5}));
+        F_batch_tensor.index_put_({torch::indexing::Slice(), 2, 1}, defgrad_fortran.index({torch::indexing::Slice(), 7}));
+        F_batch_tensor.index_put_({torch::indexing::Slice(), 0, 2}, defgrad_fortran.index({torch::indexing::Slice(), 8}));
+    }
+
+    return 0;
+}
+
+int readout_vumat_batch_results(
+    const torch::jit::IValue &results,
+    int nblock,
+    int ndir,
+    int nshr,
+    double *enerInternNew,
+    double *stressNew)
+{
+    if (!enerInternNew || !stressNew || nblock <= 0)
+    {
+        return 110;
+    }
+
+    const int nstress = ndir + nshr;
+
+    try
+    {
+        if (!results.isTuple())
+        {
+            return 111;
+        }
+
+        auto result_tuple = results.toTuple();
+        const auto &elements = result_tuple->elements();
+        if (elements.size() < 2)
+        {
+            return 111;
+        }
+
+        auto energy_ivalue = elements[0];
+        if (energy_ivalue.isDouble())
+        {
+            if (nblock != 1)
+            {
+                return 111;
+            }
+            enerInternNew[0] = energy_ivalue.toDouble();
+        }
+        else if (energy_ivalue.isTensor())
+        {
+            auto energy_tensor = energy_ivalue.toTensor().detach();
+            if (energy_tensor.dtype() != torch::kDouble)
+            {
+                energy_tensor = energy_tensor.to(torch::kDouble);
+            }
+            if (energy_tensor.device() != torch::kCPU)
+            {
+                energy_tensor = energy_tensor.to(torch::kCPU);
+            }
+            energy_tensor = energy_tensor.contiguous().reshape({-1});
+
+            if (energy_tensor.numel() != nblock)
+            {
+                return 111;
+            }
+
+            std::memcpy(enerInternNew, energy_tensor.data_ptr<double>(), static_cast<size_t>(nblock) * sizeof(double));
+        }
+        else
+        {
+            return 111;
+        }
+
+        auto stress_tensor = elements[1].toTensor().detach();
+        if (stress_tensor.dtype() != torch::kDouble)
+        {
+            stress_tensor = stress_tensor.to(torch::kDouble);
+        }
+        if (stress_tensor.device() != torch::kCPU)
+        {
+            stress_tensor = stress_tensor.to(torch::kCPU);
+        }
+
+        if (stress_tensor.numel() != static_cast<int64_t>(nblock) * static_cast<int64_t>(nstress))
+        {
+            return 111;
+        }
+
+        auto stress_2d = stress_tensor.contiguous().reshape({nblock, nstress});
+        auto stress_fortran = stress_2d.t().contiguous();
+        std::memcpy(stressNew,
+                    stress_fortran.data_ptr<double>(),
+                    static_cast<size_t>(nblock) * static_cast<size_t>(nstress) * sizeof(double));
+    }
+    catch (const std::exception &e)
+    {
+#ifdef ENABLE_DEBUG_OUTPUT
+        fprintf(stderr, "Error during VUMAT batch result conversion: %s\n", e.what());
+#endif
+        return 105;
+    }
+
     return 0;
 }

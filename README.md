@@ -135,11 +135,32 @@ Your TorchScript model must accept a 3x3 deformation gradient tensor and return:
 int pt_module_invoke(
     char* module_filename,  // Path to .pt file
     double* F,              // Deformation gradient [3x3]
+    double* mat_par,        // Material parameters [n_mat_par]
+    int n_mat_par,          // Number of material parameters
     double* psi,            // Output: strain energy
     double* Cauchy,        // Output: Cauchy stress
     double* DDSDDE          // Output: tangent
 );
 ```
+
+### `pt_module_invoke_vumat_batch`
+
+```c
+int pt_module_invoke_vumat_batch(
+    char* module_filename,     // Path to .pt file
+    double* defgradF,          // Fortran-order defgrad: (nblock, ndir+2*nshr)
+    int nblock,
+    int ndir,
+    int nshr,
+    double* mat_par,           // Material parameters [n_mat_par]
+    int n_mat_par,
+    double* enerInternNew,     // Output energy: (nblock)
+    double* stressNew          // Output stress: Fortran-order (nblock, ndir+nshr)
+);
+```
+
+For 3D VUMAT (`ndir=3`, `nshr=3`), deformation gradient component ordering is
+`[F11, F22, F33, F12, F23, F31, F21, F32, F13]`.
 
 ### `invoke_pt`
 
