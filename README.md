@@ -56,7 +56,9 @@ mkdir build && cd build
 cmake .. -DLIBTORCH_PATH="D:/Library/libtorch" \
          -DABAQUS_LIB_PATH="D:/SIMULIA/EstProducts/2021/win_b64/code/lib" \
          -DMODEL_PATH="D:/path/to/models" \
-         -DLOG_PATH="D:/path/to/logs"
+         -DLOG_PATH="D:/path/to/logs" \
+         -DABQNN_UMAT_TORCH_DEVICE=CPU \
+         -DABQNN_VUMAT_TORCH_DEVICE=CUDA
 ```
 
 ### Build Options
@@ -66,6 +68,8 @@ cmake .. -DLIBTORCH_PATH="D:/Library/libtorch" \
 | `BUILD_SHARED_LIBS` | ON | Build shared libraries |
 | `BUILD_TESTS` | ON | Build test executables |
 | `ENABLE_DEBUG_OUTPUT` | OFF | Enable debug logging to files |
+| `ABQNN_UMAT_TORCH_DEVICE` | CPU | UMAT inference device (`CPU` or `CUDA`) |
+| `ABQNN_VUMAT_TORCH_DEVICE` | CPU | VUMAT inference device (`CPU` or `CUDA`) |
 
 ### Configurable Paths
 
@@ -180,3 +184,4 @@ Fortran-callable wrapper that handles DLL initialization.
 | 105 | Inference or conversion error |
 | 106 | Unexpected output type |
 | 110 | Invalid input (null pointer) |
+| 112 | CUDA requested but unavailable |

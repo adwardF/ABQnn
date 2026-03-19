@@ -12,6 +12,7 @@
 
 #include <torch/torch.h>
 #include <torch/script.h>
+#include <torch/cuda.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -24,13 +25,53 @@
 static std::map<std::string, torch::jit::Module> module_table;
 static std::shared_mutex module_table_mutex;
 
-static int try_load_module(const char *module_filename, torch::jit::Module *&out_module)
+enum class RequestKind
+{
+    UMAT,
+    VUMAT
+};
+
+static const char *get_configured_device_name(RequestKind request_kind)
+{
+    return request_kind == RequestKind::UMAT ? ABQNN_UMAT_TORCH_DEVICE : ABQNN_VUMAT_TORCH_DEVICE;
+}
+
+static torch::Device get_inference_device(RequestKind request_kind)
+{
+    if (std::strcmp(get_configured_device_name(request_kind), "CUDA") == 0)
+    {
+        if (torch::cuda::is_available())
+        {
+            return torch::Device(torch::kCUDA);
+        }
+        return torch::Device(torch::kCPU);
+    }
+    return torch::Device(torch::kCPU);
+}
+
+static int validate_inference_devices()
+{
+    const bool umat_wants_cuda = std::strcmp(ABQNN_UMAT_TORCH_DEVICE, "CUDA") == 0;
+    const bool vumat_wants_cuda = std::strcmp(ABQNN_VUMAT_TORCH_DEVICE, "CUDA") == 0;
+
+    if ((umat_wants_cuda || vumat_wants_cuda) && !torch::cuda::is_available())
+    {
+#ifdef ENABLE_DEBUG_OUTPUT
+        std::fprintf(stderr, "server: CUDA requested but CUDA is not available\n");
+#endif
+        return 112;
+    }
+    return 0;
+}
+
+static int try_load_module(const char *module_filename, RequestKind request_kind, torch::jit::Module *&out_module)
 {
     std::string module_filename_str(module_filename);
+    std::string module_cache_key = module_filename_str + "|" + get_configured_device_name(request_kind);
 
     {
         std::shared_lock<std::shared_mutex> lock(module_table_mutex);
-        auto it = module_table.find(module_filename_str);
+        auto it = module_table.find(module_cache_key);
         if (it != module_table.end())
         {
             out_module = &it->second;
@@ -39,7 +80,7 @@ static int try_load_module(const char *module_filename, torch::jit::Module *&out
     }
 
     std::unique_lock<std::shared_mutex> lock(module_table_mutex);
-    auto it = module_table.find(module_filename_str);
+    auto it = module_table.find(module_cache_key);
     if (it != module_table.end())
     {
         out_module = &it->second;
@@ -49,11 +90,12 @@ static int try_load_module(const char *module_filename, torch::jit::Module *&out
     try
     {
         std::filesystem::current_path(ABQNN_MODEL_PATH);
-        torch::jit::Module module = torch::jit::load(module_filename_str, torch::kCPU);
-        module.to(torch::kCPU);
+        auto inference_device = get_inference_device(request_kind);
+        torch::jit::Module module = torch::jit::load(module_filename_str, inference_device);
+        module.to(inference_device);
         module.eval();
 
-        auto [inserted_it, success] = module_table.emplace(module_filename_str, std::move(module));
+        auto [inserted_it, success] = module_table.emplace(module_cache_key, std::move(module));
         if (!success)
         {
             return 102;
@@ -129,7 +171,7 @@ static int handle_umat_request(const std::vector<char> &req, std::vector<char> &
     const double *mat_par = n_mat_par > 0 ? reinterpret_cast<const double *>(req.data() + off) : nullptr;
 
     torch::jit::Module *mod_ptr = nullptr;
-    int mod_load_err = try_load_module(module_name.c_str(), mod_ptr);
+    int mod_load_err = try_load_module(module_name.c_str(), RequestKind::UMAT, mod_ptr);
 
     int32_t status = mod_load_err;
     double psi = 0.0;
@@ -144,6 +186,10 @@ static int handle_umat_request(const std::vector<char> &req, std::vector<char> &
             torch::Tensor mat_par_tensor = (mat_par && n_mat_par > 0)
                 ? torch::from_blob((void *)mat_par, {n_mat_par}, torch::kDouble).contiguous()
                 : torch::empty({0}, torch::kDouble);
+
+            auto inference_device = get_inference_device(RequestKind::UMAT);
+            F_tensor = F_tensor.to(inference_device);
+            mat_par_tensor = mat_par_tensor.to(inference_device);
 
             auto results = mod_ptr->forward({F_tensor, mat_par_tensor});
             if (!results.isTuple())
@@ -254,7 +300,7 @@ static int handle_vumat_request(const std::vector<char> &req, std::vector<char> 
     const double *mat_par = n_mat_par > 0 ? reinterpret_cast<const double *>(req.data() + off) : nullptr;
 
     torch::jit::Module *mod_ptr = nullptr;
-    int mod_load_err = try_load_module(module_name.c_str(), mod_ptr);
+    int mod_load_err = try_load_module(module_name.c_str(), RequestKind::VUMAT, mod_ptr);
 
     int32_t status = mod_load_err;
     const int nstress = ndir + nshr;
@@ -273,6 +319,10 @@ static int handle_vumat_request(const std::vector<char> &req, std::vector<char> 
                 torch::Tensor mat_par_tensor = (mat_par && n_mat_par > 0)
                     ? torch::from_blob((void *)mat_par, {n_mat_par}, torch::kDouble).contiguous()
                     : torch::empty({0}, torch::kDouble);
+
+                auto inference_device = get_inference_device(RequestKind::VUMAT);
+                F_batch_tensor = F_batch_tensor.to(inference_device);
+                mat_par_tensor = mat_par_tensor.to(inference_device);
 
                 auto results = mod_ptr->forward({F_batch_tensor, mat_par_tensor});
                 if (!results.isTuple())
@@ -410,7 +460,31 @@ int main()
     auto log_file = (std::filesystem::path(ABQNN_LOG_PATH) / "ipc_server_err.txt").string();
     std::freopen(log_file.c_str(), "a", stderr);
     std::fprintf(stderr, "ABQnn IPC server starting...\n");
+    std::fprintf(stderr, "ABQnn UMAT device: %s\n", ABQNN_UMAT_TORCH_DEVICE);
+    std::fprintf(stderr, "ABQnn VUMAT device: %s\n", ABQNN_VUMAT_TORCH_DEVICE);
 #endif
+
+    // Due to some reasons, we need to first load torch_cuda.dll manually 
+    // before any CUDA-related API is called
+    if(!LoadLibraryEx("torch_cuda.dll", NULL, LOAD_WITH_ALTERED_SEARCH_PATH))
+    {
+        DWORD err = GetLastError();
+#ifdef ENABLE_DEBUG_OUTPUT
+        std::fprintf(stderr, "server: warning: failed to load torch_cuda.dll (%lu), CUDA inference will not work\n", err);
+#endif
+    }
+    else
+    {
+#ifdef ENABLE_DEBUG_OUTPUT
+        std::fprintf(stderr, "server: successfully loaded torch_cuda.dll\n");
+#endif
+    }
+
+    int device_err = validate_inference_devices();
+    if (device_err != 0)
+    {
+        return device_err;
+    }
 
     auto serve_client = [](HANDLE pipe)
     {
