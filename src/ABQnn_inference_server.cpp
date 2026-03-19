@@ -133,8 +133,8 @@ static int handle_umat_request(const std::vector<char> &req, std::vector<char> &
 
     int32_t status = mod_load_err;
     double psi = 0.0;
-    double Cauchy[6] = {0};
-    double DDSDDE[36] = {0};
+    std::vector<double> cauchy;
+    std::vector<double> ddsdde;
 
     if (status == 0)
     {
@@ -146,36 +146,64 @@ static int handle_umat_request(const std::vector<char> &req, std::vector<char> &
                 : torch::empty({0}, torch::kDouble);
 
             auto results = mod_ptr->forward({F_tensor, mat_par_tensor});
+            if (!results.isTuple())
+            {
+                status = 111;
+            }
             auto result_tuple = results.toTuple();
-
-            auto &psi_result = result_tuple->elements()[0];
-            if (psi_result.isDouble())
+            const auto &elements = result_tuple->elements();
+            if (status == 0 && elements.size() < 3)
             {
-                psi = psi_result.toDouble();
-            }
-            else if (psi_result.isTensor())
-            {
-                auto psi_tensor = psi_result.toTensor().to(torch::kCPU).to(torch::kDouble);
-                psi = psi_tensor.item<double>();
-            }
-            else
-            {
-                status = 106;
+                status = 111;
             }
 
             if (status == 0)
             {
-                auto cauchy_tensor = result_tuple->elements()[1].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous();
-                auto ddsdde_tensor = result_tuple->elements()[2].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous();
+                auto &psi_result = elements[0];
+                if (psi_result.isDouble())
+                {
+                    psi = psi_result.toDouble();
+                }
+                else if (psi_result.isTensor())
+                {
+                    auto psi_tensor = psi_result.toTensor().to(torch::kCPU).to(torch::kDouble);
+                    if (psi_tensor.numel() != 1)
+                    {
+                        status = 111;
+                    }
+                    else
+                    {
+                        psi = psi_tensor.item<double>();
+                    }
+                }
+                else
+                {
+                    status = 106;
+                }
+            }
 
-                if (cauchy_tensor.numel() != 6 || ddsdde_tensor.numel() != 36)
+            if (status == 0)
+            {
+                if (!elements[1].isTensor() || !elements[2].isTensor())
                 {
                     status = 111;
                 }
                 else
                 {
-                    std::memcpy(Cauchy, cauchy_tensor.data_ptr<double>(), 6 * sizeof(double));
-                    std::memcpy(DDSDDE, ddsdde_tensor.data_ptr<double>(), 36 * sizeof(double));
+                    auto cauchy_tensor = elements[1].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({-1});
+                    auto ddsdde_tensor = elements[2].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({-1});
+
+                    if (cauchy_tensor.numel() <= 0 || ddsdde_tensor.numel() <= 0)
+                    {
+                        status = 111;
+                    }
+                    else
+                    {
+                        cauchy.resize(static_cast<size_t>(cauchy_tensor.numel()));
+                        ddsdde.resize(static_cast<size_t>(ddsdde_tensor.numel()));
+                        std::memcpy(cauchy.data(), cauchy_tensor.data_ptr<double>(), cauchy.size() * sizeof(double));
+                        std::memcpy(ddsdde.data(), ddsdde_tensor.data_ptr<double>(), ddsdde.size() * sizeof(double));
+                    }
                 }
             }
         }
@@ -191,9 +219,13 @@ static int handle_umat_request(const std::vector<char> &req, std::vector<char> &
     abqnn::ipc::append_scalar(resp, status);
     if (status == 0)
     {
+        int32_t cauchy_n = static_cast<int32_t>(cauchy.size());
+        int32_t ddsdde_n = static_cast<int32_t>(ddsdde.size());
         abqnn::ipc::append_scalar(resp, psi);
-        abqnn::ipc::append_bytes(resp, Cauchy, 6 * sizeof(double));
-        abqnn::ipc::append_bytes(resp, DDSDDE, 36 * sizeof(double));
+        abqnn::ipc::append_scalar(resp, cauchy_n);
+        abqnn::ipc::append_scalar(resp, ddsdde_n);
+        abqnn::ipc::append_bytes(resp, cauchy.data(), cauchy.size() * sizeof(double));
+        abqnn::ipc::append_bytes(resp, ddsdde.data(), ddsdde.size() * sizeof(double));
     }
 
     return 0;

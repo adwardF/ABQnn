@@ -10,12 +10,11 @@ extern "C" {
  * 
  * This function is the Abaqus-facing IPC client entrypoint.
  * Thread-safe initialization is performed on first call.
- * The shapes of the input and output arrays depdend on the material model.
- * In all cases F is a 3x3 deformation gradient tensor
- * psi is a scalar strain energy
- * Plane stress: Cauchy: [3], DDSDDE: [3][3]
- * Plane strain: Cauchy: [4], DDSDDE: [4][4]
- * 3D stress: Cauchy: [6], DDSDDE: [6][6]
+ * The shape of F is fixed as 3x3, while output sizes are model-defined.
+ * In all cases F is a 3x3 deformation gradient tensor and psi is a scalar.
+ * Cauchy and DDSDDE are filled from server response payload exactly as produced
+ * by the TorchScript model (for example, 4 and 16 values for a 2D formulation,
+ * or 6 and 36 values for a 3D formulation).
  * 
  * @param module_filename Path to the .pt TorchScript model file
  * @param F Deformation gradient tensor [3][3] (input)

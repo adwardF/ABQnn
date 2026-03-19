@@ -96,14 +96,29 @@ int invoke_pt(const char *module_filename,
         return abqnn::ipc::ERR_IPC_PROTOCOL;
     }
 
-    if (off + 6 * sizeof(double) + 36 * sizeof(double) != resp.size())
+    int32_t cauchy_n = 0;
+    int32_t ddsdde_n = 0;
+    if (!abqnn::ipc::read_scalar(resp, off, cauchy_n) || !abqnn::ipc::read_scalar(resp, off, ddsdde_n))
     {
         return abqnn::ipc::ERR_IPC_PROTOCOL;
     }
 
-    std::memcpy(Cauchy, resp.data() + off, 6 * sizeof(double));
-    off += 6 * sizeof(double);
-    std::memcpy(DDSDDE, resp.data() + off, 36 * sizeof(double));
+    if (cauchy_n <= 0 || ddsdde_n <= 0)
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+
+    size_t cauchy_bytes = static_cast<size_t>(cauchy_n) * sizeof(double);
+    size_t ddsdde_bytes = static_cast<size_t>(ddsdde_n) * sizeof(double);
+
+    if (off + cauchy_bytes + ddsdde_bytes != resp.size())
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+
+    std::memcpy(Cauchy, resp.data() + off, cauchy_bytes);
+    off += cauchy_bytes;
+    std::memcpy(DDSDDE, resp.data() + off, ddsdde_bytes);
 
     return 0;
 }
