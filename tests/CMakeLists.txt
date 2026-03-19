@@ -36,9 +36,35 @@ target_include_directories(pt_caller_test PRIVATE
     ${CMAKE_BINARY_DIR}/include
 )
 
-target_link_libraries(pt_caller_test PRIVATE umat_pt_caller)
+target_link_libraries(pt_caller_test PRIVATE umat_auxlib)
 
 add_test(NAME cpp_test COMMAND pt_caller_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+if(WIN32)
+    find_program(ABQNN_PWSH_EXE NAMES pwsh powershell REQUIRED)
+
+    set(ABQNN_TEST_PID_FILE "${CMAKE_BINARY_DIR}/abqnn_inference_server.pid")
+
+    add_test(
+        NAME ipc_server_setup
+        COMMAND ${ABQNN_PWSH_EXE} -NoProfile -ExecutionPolicy Bypass
+                -File ${CMAKE_CURRENT_SOURCE_DIR}/start_ipc_server.ps1
+                -ServerExe $<TARGET_FILE:abqnn_inference_server>
+                -TorchLibDir ${LIBTORCH_LIB_PATH}
+                -PidFile ${ABQNN_TEST_PID_FILE}
+    )
+    set_tests_properties(ipc_server_setup PROPERTIES FIXTURES_SETUP ipc_server)
+
+    add_test(
+        NAME ipc_server_cleanup
+        COMMAND ${ABQNN_PWSH_EXE} -NoProfile -ExecutionPolicy Bypass
+                -File ${CMAKE_CURRENT_SOURCE_DIR}/stop_ipc_server.ps1
+                -PidFile ${ABQNN_TEST_PID_FILE}
+    )
+    set_tests_properties(ipc_server_cleanup PROPERTIES FIXTURES_CLEANUP ipc_server)
+
+    set_tests_properties(cpp_test PROPERTIES FIXTURES_REQUIRED ipc_server)
+endif()
 
 # -----------------------------------------------------------------------------
 # Fortran Test (optional - only if compiler found)
@@ -60,6 +86,11 @@ if(CMAKE_Fortran_COMPILER)
     
     add_test(NAME fortran_test       COMMAND umat_fortest  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     add_test(NAME fortran_vumat_test COMMAND vumat_fortest WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    if(WIN32)
+        set_tests_properties(fortran_test       PROPERTIES FIXTURES_REQUIRED ipc_server)
+        set_tests_properties(fortran_vumat_test PROPERTIES FIXTURES_REQUIRED ipc_server)
+    endif()
 else()
     message(STATUS "No Fortran compiler - skipping Fortran tests")
 endif()

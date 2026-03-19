@@ -7,7 +7,7 @@
 #include <cstring>
 #include <cmath>
 
-#include "umat_pt_caller.h"
+#include "umat_auxlib.h"
 
 int main(int argc, char* argv[])
 {
@@ -40,10 +40,10 @@ int main(int argc, char* argv[])
     
     double mat_par[2] = {1.0, 10.0};
     
-    int err = pt_module_invoke(model_path, &F[0][0], mat_par, 2, &psi, Cauchy6, &DDSDDE[0][0]);
+    int err = invoke_pt(model_path, &F[0][0], mat_par, 2, &psi, Cauchy6, &DDSDDE[0][0]);
     
     if (err != 0) {
-        std::cerr << "Error: pt_module_invoke returned " << err << std::endl;
+        std::cerr << "Error: invoke_pt returned " << err << std::endl;
         return err;
     }
     

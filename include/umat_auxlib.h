@@ -8,7 +8,7 @@ extern "C" {
 /**
  * @brief Invoke a PyTorch model from Fortran UMAT
  * 
- * This function handles dynamic library loading and delegates to pt_module_invoke.
+ * This function is the Abaqus-facing IPC client entrypoint.
  * Thread-safe initialization is performed on first call.
  * The shapes of the input and output arrays depdend on the material model.
  * In all cases F is a 3x3 deformation gradient tensor
@@ -25,12 +25,16 @@ extern "C" {
  * @return int Error code (0 = success)
  * 
  * Error codes:
- *   0 - Success
- *   1 - Failed to set DLL directory
- *   2 - Failed to load UMAT_pt_caller.dll
- *   3 - Failed to get DLL handle
- *   4 - Failed to get function address
- *   Other codes from pt_module_invoke
+ *   0   - Success
+ *   101 - Failed to load model on server
+ *   102 - Failed to insert model into server cache
+ *   105 - Server inference or conversion error
+ *   110 - Invalid input parameters
+ *   111 - Unsupported tensor layout/shape mismatch
+ *   120 - IPC connect error
+ *   121 - IPC write error
+ *   122 - IPC read error
+ *   123 - IPC protocol error
  */
 int invoke_pt(
     const char* module_filename,
