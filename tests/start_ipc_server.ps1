@@ -15,6 +15,8 @@ if (-not (Test-Path -Path $ServerExe)) {
     Write-Error "Server executable not found: $ServerExe"
 }
 
+Get-Process -Name "abqnn_inference_server" -ErrorAction SilentlyContinue | Stop-Process -Force
+
 $env:PATH = "$TorchLibDir;$env:PATH"
 
 $proc = Start-Process -FilePath $ServerExe -PassThru -WindowStyle Hidden
