@@ -3,6 +3,45 @@
 
 namespace abqnn::ipc {
 
+static HANDLE connect_pipe_with_retry(const char* pipe_name)
+{
+    constexpr int kMaxAttempts = 50;
+    constexpr DWORD kWaitMs = 50;
+
+    for (int attempt = 0; attempt < kMaxAttempts; ++attempt)
+    {
+        HANDLE pipe = CreateFileA(
+            pipe_name,
+            GENERIC_READ | GENERIC_WRITE,
+            0,
+            NULL,
+            OPEN_EXISTING,
+            0,
+            NULL);
+
+        if (pipe != INVALID_HANDLE_VALUE)
+        {
+            return pipe;
+        }
+
+        DWORD err = GetLastError();
+        if (err == ERROR_PIPE_BUSY)
+        {
+            if (!WaitNamedPipeA(pipe_name, kWaitMs))
+            {
+                DWORD wait_err = GetLastError();
+                if (wait_err != ERROR_SEM_TIMEOUT)
+                {
+                    break;
+                }
+            }
+            continue;
+        }
+        break;
+    }
+    return INVALID_HANDLE_VALUE;
+}
+
 bool write_all(HANDLE h, const void* data, size_t n)
 {
     const char* p = static_cast<const char*>(data);
@@ -41,14 +80,7 @@ int transact_blocking(const char* pipe_name,
                      uint32_t expected_response_type,
                      std::vector<char>& response_payload)
 {
-    HANDLE pipe = CreateFileA(
-        pipe_name,
-        GENERIC_READ | GENERIC_WRITE,
-        0,
-        NULL,
-        OPEN_EXISTING,
-        0,
-        NULL);
+    HANDLE pipe = connect_pipe_with_retry(pipe_name);
 
     if (pipe == INVALID_HANDLE_VALUE)
     {

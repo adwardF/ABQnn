@@ -38,7 +38,18 @@ target_include_directories(pt_caller_test PRIVATE
 
 target_link_libraries(pt_caller_test PRIVATE umat_auxlib)
 
+add_executable(pt_caller_concurrency_test pt_caller_concurrency_test.cpp)
+
+target_include_directories(pt_caller_concurrency_test PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_BINARY_DIR}/include
+)
+
+target_link_libraries(pt_caller_concurrency_test PRIVATE umat_auxlib)
+
 add_test(NAME cpp_test COMMAND pt_caller_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME cpp_concurrency_test COMMAND pt_caller_concurrency_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(cpp_concurrency_test PROPERTIES TIMEOUT 70)
 
 if(WIN32)
     find_program(ABQNN_PWSH_EXE NAMES pwsh powershell REQUIRED)
@@ -64,6 +75,7 @@ if(WIN32)
     set_tests_properties(ipc_server_cleanup PROPERTIES FIXTURES_CLEANUP ipc_server)
 
     set_tests_properties(cpp_test PROPERTIES FIXTURES_REQUIRED ipc_server)
+    set_tests_properties(cpp_concurrency_test PROPERTIES FIXTURES_REQUIRED ipc_server)
 endif()
 
 # -----------------------------------------------------------------------------
