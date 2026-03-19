@@ -126,9 +126,6 @@ include(GNUInstallDirs)
 if(ABAQUS_LIB_PATH)
     install(TARGETS umat_auxlib ARCHIVE DESTINATION ${ABAQUS_LIB_PATH})
 endif()
-if(LIBTORCH_LIB_PATH)
-    install(TARGETS abqnn_inference_server RUNTIME DESTINATION ${LIBTORCH_LIB_PATH})
-endif()
 
 # -----------------------------------------------------------------------------
 # Build Summary
