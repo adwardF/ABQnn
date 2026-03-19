@@ -14,7 +14,7 @@
 
 int main(int argc, char *argv[])
 {
-    const char *model_path = "test_NH_3D.pt";
+    const char *model_path = "NH_3D.pt";
     if (argc > 1)
     {
         model_path = argv[1];

@@ -50,7 +50,7 @@ write(*,*) "Generated 1000 random deformation gradients"
 
 ! Test model invocation
 do i = 1, 1000
-    err = invoke_pt(c_char_"test_NH_3D.pt" // c_null_char, &
+    err = invoke_pt(c_char_"NH_3D.pt" // c_null_char, &
                     F(i,:,:), mat_par, n_mat_par, psi, cauchy6, DDSDDE)
     
     if (err /= 0) then
