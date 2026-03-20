@@ -56,6 +56,14 @@ int invoke_pt(const char *module_filename,
     {
         return 110;
     }
+    if (n_mat_par < 0)
+    {
+        return 110;
+    }
+    if (n_mat_par > 0 && !mat_par)
+    {
+        return 110;
+    }
 
     uint32_t module_len = static_cast<uint32_t>(std::strlen(module_filename));
     int32_t n_mat_par_i32 = static_cast<int32_t>(n_mat_par);
@@ -143,6 +151,14 @@ int invoke_pt_vumat_batch(const char *module_filename,
     }
 
     if (!module_filename || !defgradF || !enerInternNew || !stressNew || nblock <= 0)
+    {
+        return 110;
+    }
+    if (n_mat_par < 0)
+    {
+        return 110;
+    }
+    if (n_mat_par > 0 && !mat_par)
     {
         return 110;
     }
