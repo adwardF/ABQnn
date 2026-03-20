@@ -182,6 +182,114 @@ static int build_defgrad_batch_tensor(const double *defgradF,
     return 0;
 }
 
+static int decode_umat_results(const torch::jit::IValue &results,
+                               double &psi,
+                               std::vector<double> &cauchy,
+                               std::vector<double> &ddsdde)
+{
+    if (!results.isTuple())
+    {
+        return 111;
+    }
+
+    auto result_tuple = results.toTuple();
+    const auto &elements = result_tuple->elements();
+    if (elements.size() < 3)
+    {
+        return 111;
+    }
+
+    const auto &psi_result = elements[0];
+    if (psi_result.isDouble())
+    {
+        psi = psi_result.toDouble();
+    }
+    else if (psi_result.isTensor())
+    {
+        auto psi_tensor = psi_result.toTensor().to(torch::kCPU).to(torch::kDouble);
+        if (psi_tensor.numel() != 1)
+        {
+            return 111;
+        }
+        psi = psi_tensor.item<double>();
+    }
+    else
+    {
+        return 106;
+    }
+
+    if (!elements[1].isTensor() || !elements[2].isTensor())
+    {
+        return 111;
+    }
+
+    auto cauchy_tensor = elements[1].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({-1});
+    auto ddsdde_tensor = elements[2].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({-1});
+    if (cauchy_tensor.numel() <= 0 || ddsdde_tensor.numel() <= 0)
+    {
+        return 111;
+    }
+
+    cauchy.resize(static_cast<size_t>(cauchy_tensor.numel()));
+    ddsdde.resize(static_cast<size_t>(ddsdde_tensor.numel()));
+    std::memcpy(cauchy.data(), cauchy_tensor.data_ptr<double>(), cauchy.size() * sizeof(double));
+    std::memcpy(ddsdde.data(), ddsdde_tensor.data_ptr<double>(), ddsdde.size() * sizeof(double));
+    return 0;
+}
+
+static int decode_vumat_results(const torch::jit::IValue &results,
+                                int nblock,
+                                int nstress,
+                                std::vector<double> &energy,
+                                std::vector<double> &stress)
+{
+    if (!results.isTuple())
+    {
+        return 111;
+    }
+
+    auto result_tuple = results.toTuple();
+    const auto &elements = result_tuple->elements();
+    if (elements.size() < 2)
+    {
+        return 111;
+    }
+
+    const auto &energy_ivalue = elements[0];
+    if (energy_ivalue.isTensor())
+    {
+        auto e = energy_ivalue.toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({-1});
+        if (e.numel() != nblock)
+        {
+            return 111;
+        }
+        std::memcpy(energy.data(), e.data_ptr<double>(), static_cast<size_t>(nblock) * sizeof(double));
+    }
+    else if (energy_ivalue.isDouble() && nblock == 1)
+    {
+        energy[0] = energy_ivalue.toDouble();
+    }
+    else
+    {
+        return 111;
+    }
+
+    if (!elements[1].isTensor())
+    {
+        return 111;
+    }
+
+    auto s = elements[1].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({nblock, nstress});
+    if (s.numel() != static_cast<int64_t>(nblock) * static_cast<int64_t>(nstress))
+    {
+        return 111;
+    }
+
+    auto s_fortran = s.t().contiguous();
+    std::memcpy(stress.data(), s_fortran.data_ptr<double>(), stress.size() * sizeof(double));
+    return 0;
+}
+
 static int handle_umat_request(const std::vector<char> &req, std::vector<char> &resp)
 {
     size_t off = 0;
@@ -224,66 +332,7 @@ static int handle_umat_request(const std::vector<char> &req, std::vector<char> &
             mat_par_tensor = mat_par_tensor.to(inference_device);
 
             auto results = mod_ptr->forward({F_tensor, mat_par_tensor});
-            if (!results.isTuple())
-            {
-                status = 111;
-            }
-            auto result_tuple = results.toTuple();
-            const auto &elements = result_tuple->elements();
-            if (status == 0 && elements.size() < 3)
-            {
-                status = 111;
-            }
-
-            if (status == 0)
-            {
-                auto &psi_result = elements[0];
-                if (psi_result.isDouble())
-                {
-                    psi = psi_result.toDouble();
-                }
-                else if (psi_result.isTensor())
-                {
-                    auto psi_tensor = psi_result.toTensor().to(torch::kCPU).to(torch::kDouble);
-                    if (psi_tensor.numel() != 1)
-                    {
-                        status = 111;
-                    }
-                    else
-                    {
-                        psi = psi_tensor.item<double>();
-                    }
-                }
-                else
-                {
-                    status = 106;
-                }
-            }
-
-            if (status == 0)
-            {
-                if (!elements[1].isTensor() || !elements[2].isTensor())
-                {
-                    status = 111;
-                }
-                else
-                {
-                    auto cauchy_tensor = elements[1].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({-1});
-                    auto ddsdde_tensor = elements[2].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({-1});
-
-                    if (cauchy_tensor.numel() <= 0 || ddsdde_tensor.numel() <= 0)
-                    {
-                        status = 111;
-                    }
-                    else
-                    {
-                        cauchy.resize(static_cast<size_t>(cauchy_tensor.numel()));
-                        ddsdde.resize(static_cast<size_t>(ddsdde_tensor.numel()));
-                        std::memcpy(cauchy.data(), cauchy_tensor.data_ptr<double>(), cauchy.size() * sizeof(double));
-                        std::memcpy(ddsdde.data(), ddsdde_tensor.data_ptr<double>(), ddsdde.size() * sizeof(double));
-                    }
-                }
-            }
+            status = decode_umat_results(results, psi, cauchy, ddsdde);
         }
         catch (const std::exception &e)
         {
@@ -357,57 +406,7 @@ static int handle_vumat_request(const std::vector<char> &req, std::vector<char> 
                 mat_par_tensor = mat_par_tensor.to(inference_device);
 
                 auto results = mod_ptr->forward({F_batch_tensor, mat_par_tensor});
-                if (!results.isTuple())
-                {
-                    status = 111;
-                }
-                else
-                {
-                    auto result_tuple = results.toTuple();
-                    const auto &elements = result_tuple->elements();
-                    if (elements.size() < 2)
-                    {
-                        status = 111;
-                    }
-                    else
-                    {
-                        auto energy_ivalue = elements[0];
-                        if (energy_ivalue.isTensor())
-                        {
-                            auto e = energy_ivalue.toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({-1});
-                            if (e.numel() != nblock)
-                            {
-                                status = 111;
-                            }
-                            else
-                            {
-                                std::memcpy(energy.data(), e.data_ptr<double>(), static_cast<size_t>(nblock) * sizeof(double));
-                            }
-                        }
-                        else if (energy_ivalue.isDouble() && nblock == 1)
-                        {
-                            energy[0] = energy_ivalue.toDouble();
-                        }
-                        else
-                        {
-                            status = 111;
-                        }
-
-                        if (status == 0)
-                        {
-                            auto s = elements[1].toTensor().to(torch::kCPU).to(torch::kDouble).contiguous().reshape({nblock, nstress});
-                            if (s.numel() != static_cast<int64_t>(nblock) * static_cast<int64_t>(nstress))
-                            {
-                                status = 111;
-                            }
-                            else
-                            {
-                                auto s_fortran = s.t().contiguous();
-                                std::memcpy(stress.data(), s_fortran.data_ptr<double>(), stress.size() * sizeof(double));
-                            }
-                        }
-                    }
-                }
+                status = decode_vumat_results(results, nblock, nstress, energy, stress);
             }
         }
         catch (const std::exception &e)
