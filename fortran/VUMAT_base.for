@@ -77,7 +77,7 @@ subroutine vumat(  &
       iElemNumStartLoc = jInfoArray(i_info_ElemNumStartLoc)
       ptrjElemNum = loc(jInfoArray(iElemNumStartLoc))
 
-      if ( (ndir .ne. 3) .or. (nshr .ne. 1) ) then
+      if ( (ndir .ne. 3) .or. ((nshr .ne. 1) .and. (nshr .ne. 3)) ) then
         call XPLB_ABQERR(-3,"Error: wrong number of stress components: %I + %I", [ndir, nshr], 0, 0)
       end if
 
