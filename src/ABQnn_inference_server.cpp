@@ -67,7 +67,7 @@ static int validate_inference_devices()
             std::fprintf(stderr, "server: warning: failed to add %ls to DLL search path (%lu), CUDA inference may not work\n", dll_path, err);
 #endif
         }
-        if(!LoadLibraryEx("torch_cuda.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS))
+        if(!LoadLibraryExA("torch_cuda.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS))
         {
             DWORD err = GetLastError();
 #ifdef ENABLE_DEBUG_OUTPUT
