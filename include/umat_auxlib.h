@@ -30,6 +30,7 @@ extern "C" {
  *   105 - Server inference or conversion error
  *   110 - Invalid input parameters
  *   111 - Unsupported tensor layout/shape mismatch
+ *   112 - CUDA requested but unavailable on server
  *   120 - IPC connect error
  *   121 - IPC write error
  *   122 - IPC read error
