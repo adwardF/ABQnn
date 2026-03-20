@@ -55,6 +55,8 @@ if(WIN32)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS -DNOMINMAX)
     # Enable MSVC parallel compilation across translation units
     add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/MP>)
+else()
+    message(FATAL_ERROR "ABQnn currently supports Windows only. Non-Windows IPC backends are not implemented yet.")
 endif()
 
 # Output directories
