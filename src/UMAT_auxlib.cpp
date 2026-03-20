@@ -3,7 +3,8 @@
 #include <cstring>
 
 #include <string>
-#include <map>
+#include <filesystem>
+#include <vector>
 
 #include <ctime>
 #include <mutex>
@@ -14,115 +15,26 @@
 
 #include "umat_auxlib.h"
 #include "abqnn_config.h"
+#include "abqnn_ipc_protocol.h"
+#include "abqnn_ipc_common.h"
 
-// Thread safety for initialization - most efficient approach
 static std::once_flag init_flag;
 static int initialization_error = 0;
-typedef int (*pt_module_invoke_func)(const char*, const double*, const double*, int, double*, double*, double*);
-static pt_module_invoke_func pt_module_invoke_handle = nullptr;
+static const char *kPipeName = ABQNN_DEFAULT_PIPE_NAME;
 
-int try_load_dll(const char *dll_name)
+static int initialize_library()
 {
-    // First check if DLL is already loaded
-    HMODULE existing_handle = GetModuleHandleA(dll_name);
-    if (existing_handle != NULL)
-    {
-        #ifdef ENABLE_DEBUG_OUTPUT
-        fprintf(stderr, "DLL %s already loaded\n", dll_name);
-        #endif
-        return 0; // Already loaded
-    }
-    
-    HMODULE handle = LoadLibraryExA(dll_name, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-    if (handle == NULL)
-    {
-        DWORD error = GetLastError();
-        if(error == ERROR_ALREADY_EXISTS) // 183
-            return 0;
-        
-        #ifdef ENABLE_DEBUG_OUTPUT
-        fprintf(stderr, "Failed to load %s: error code %lu", dll_name, error);
-        switch(error) {
-            case 2: fprintf(stderr, " (File not found)\n"); break;
-            case 3: fprintf(stderr, " (Path not found)\n"); break;
-            case 126: fprintf(stderr, " (Module not found - missing dependencies)\n"); break;
-            case 127: fprintf(stderr, " (Procedure not found - dependency issue)\n"); break;
-            case 193: fprintf(stderr, " (Not a valid Win32 application)\n"); break;
-            default: fprintf(stderr, " (Unknown error)\n"); break;
-        }
-        #endif
-        return 1;
-    }
-    
-    #ifdef ENABLE_DEBUG_OUTPUT
-    fprintf(stderr, "Successfully loaded %s\n", dll_name);
-    #endif
-    return 0;
-}
-
-int initialize_library()
-{   
-    // Note: This function is now called via std::call_once
-    #ifdef ENABLE_DEBUG_OUTPUT
-    
+#ifdef ENABLE_DEBUG_OUTPUT
+    std::filesystem::create_directories(ABQNN_LOG_PATH);
     char log_file_path[MAX_PATH];
-    snprintf(log_file_path, MAX_PATH, "%s/auxlib_err.txt", ABQNN_LOG_PATH);
-    freopen(log_file_path, "a", stderr);
+    std::snprintf(log_file_path, MAX_PATH, "%s/auxlib_err.txt", ABQNN_LOG_PATH);
+    std::freopen(log_file_path, "a", stderr);
 
     time_t now = time(NULL);
-    fprintf(stderr, "UMAT_auxlib.cpp: %s", ctime(&now));
-    fprintf(stderr, "Starting library initialization...\n");
-    fprintf(stderr, "LibTorch lib path: %s\n", ABQNN_LIBTORCH_LIB_PATH);
-    // Debug: Show current working directory
-    char current_dir[MAX_PATH];
-    if (GetCurrentDirectoryA(MAX_PATH, current_dir))
-    {
-        fprintf(stderr, "Current working directory: %s\n", current_dir);
-    }
-    #endif
-
-    // Set DLL search paths using configured LibTorch path
-    if (!SetDllDirectoryA(ABQNN_LIBTORCH_LIB_PATH)) {
-        #ifdef ENABLE_DEBUG_OUTPUT
-        fprintf(stderr, "Warning: Failed to set DLL directory to %s (error=%lu)\n", 
-                ABQNN_LIBTORCH_LIB_PATH, GetLastError());
-        #endif
-        return 1;
-    } else {
-        #ifdef ENABLE_DEBUG_OUTPUT
-        fprintf(stderr, "Successfully set DLL directory to %s\n", ABQNN_LIBTORCH_LIB_PATH);
-        #endif
-    }
-
-    /* try_load_dll("torch_cuda.dll"); */
-    
-    int ret = try_load_dll("UMAT_pt_caller.dll");
-    if(ret)
-    {
-        #ifdef ENABLE_DEBUG_OUTPUT
-        fprintf(stderr, "Failed to load UMAT_pt_caller.dll (ret=%d)\n", ret);
-        #endif
-        return 2;
-    }
-
-    HMODULE dll = GetModuleHandleA("UMAT_pt_caller.dll");
-    if(dll == NULL)
-    {
-        #ifdef ENABLE_DEBUG_OUTPUT
-        fprintf(stderr, "Failed to get handle for UMAT_pt_caller.dll (error=%lu)\n", GetLastError());
-        #endif
-        return 3;
-    }
-
-    pt_module_invoke_handle = (pt_module_invoke_func)GetProcAddress(dll, "pt_module_invoke");
-    if(pt_module_invoke_handle == NULL)
-    {
-        #ifdef ENABLE_DEBUG_OUTPUT
-        fprintf(stderr, "Failed to get function address for pt_module_invoke (error=%lu)\n", GetLastError());
-        #endif
-        return 4;
-    }
-
+    std::fprintf(stderr, "UMAT_auxlib.cpp: %s", ctime(&now));
+    std::fprintf(stderr, "Initializing IPC client.\n");
+    std::fprintf(stderr, "Pipe endpoint: %s\n", ABQNN_DEFAULT_PIPE_NAME);
+#endif
     return 0;
 }
 
@@ -130,8 +42,7 @@ int invoke_pt(const char *module_filename,
               const double *F, const double *mat_par, int n_mat_par,
               double *psi, double *Cauchy, double *DDSDDE)
 {
-    // Thread-safe, one-time initialization - no mutex overhead after first call
-    std::call_once(init_flag, [&]() {
+    std::call_once(init_flag, []() {
         initialization_error = initialize_library();
     });
     
@@ -141,8 +52,188 @@ int invoke_pt(const char *module_filename,
         return initialization_error;
     }
     
-    // Call the C function from UMAT_pt_caller.dll
-    int err = pt_module_invoke_handle(module_filename, F, mat_par, n_mat_par, psi, Cauchy, DDSDDE);
-    
-    return err;
+    if (!module_filename || !F || !psi || !Cauchy || !DDSDDE)
+    {
+        return 110;
+    }
+    if (n_mat_par < 0)
+    {
+        return 110;
+    }
+    if (n_mat_par > 0 && !mat_par)
+    {
+        return 110;
+    }
+
+    uint32_t module_len = static_cast<uint32_t>(std::strlen(module_filename));
+    int32_t n_mat_par_i32 = static_cast<int32_t>(n_mat_par);
+
+    std::vector<char> req;
+    req.reserve(sizeof(module_len) + module_len + sizeof(n_mat_par_i32) + 9 * sizeof(double) +
+                static_cast<size_t>(n_mat_par > 0 ? n_mat_par : 0) * sizeof(double));
+
+    abqnn::ipc::append_scalar(req, module_len);
+    abqnn::ipc::append_bytes(req, module_filename, module_len);
+    abqnn::ipc::append_scalar(req, n_mat_par_i32);
+    abqnn::ipc::append_bytes(req, F, 9 * sizeof(double));
+    if (mat_par && n_mat_par > 0)
+    {
+        abqnn::ipc::append_bytes(req, mat_par, static_cast<size_t>(n_mat_par) * sizeof(double));
+    }
+
+    std::vector<char> resp;
+    int tx_err = abqnn::ipc::transact_blocking(kPipeName, ABQNN_MSG_UMAT_REQ, req, ABQNN_MSG_UMAT_RESP, resp);
+    if (tx_err != 0)
+    {
+        return tx_err;
+    }
+
+    size_t off = 0;
+    int32_t status = 0;
+    if (!abqnn::ipc::read_scalar(resp, off, status))
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+    if (status != 0)
+    {
+        return status;
+    }
+
+    if (!abqnn::ipc::read_scalar(resp, off, *psi))
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+
+    int32_t cauchy_n = 0;
+    int32_t ddsdde_n = 0;
+    if (!abqnn::ipc::read_scalar(resp, off, cauchy_n) || !abqnn::ipc::read_scalar(resp, off, ddsdde_n))
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+
+    if (cauchy_n <= 0 || ddsdde_n <= 0)
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+
+    size_t cauchy_bytes = static_cast<size_t>(cauchy_n) * sizeof(double);
+    size_t ddsdde_bytes = static_cast<size_t>(ddsdde_n) * sizeof(double);
+
+    if (off + cauchy_bytes + ddsdde_bytes != resp.size())
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+
+    std::memcpy(Cauchy, resp.data() + off, cauchy_bytes);
+    off += cauchy_bytes;
+    std::memcpy(DDSDDE, resp.data() + off, ddsdde_bytes);
+
+    return 0;
+}
+
+int invoke_pt_vumat_batch(const char *module_filename,
+                          const double *defgradF,
+                          int nblock,
+                          int ndir,
+                          int nshr,
+                          const double *mat_par,
+                          int n_mat_par,
+                          double *enerInternNew,
+                          double *stressNew)
+{
+    std::call_once(init_flag, []() {
+        initialization_error = initialize_library();
+    });
+
+    if (initialization_error != 0)
+    {
+        return initialization_error;
+    }
+
+    if (!module_filename || !defgradF || !enerInternNew || !stressNew || nblock <= 0)
+    {
+        return 110;
+    }
+    if (n_mat_par < 0)
+    {
+        return 110;
+    }
+    if (n_mat_par > 0 && !mat_par)
+    {
+        return 110;
+    }
+
+    if (!((ndir == 3 && nshr == 3) || (ndir == 3 && nshr == 1)))
+    {
+        return 111;
+    }
+
+    uint32_t module_len = static_cast<uint32_t>(std::strlen(module_filename));
+    int32_t nblock_i32 = static_cast<int32_t>(nblock);
+    int32_t ndir_i32 = static_cast<int32_t>(ndir);
+    int32_t nshr_i32 = static_cast<int32_t>(nshr);
+    int32_t n_mat_par_i32 = static_cast<int32_t>(n_mat_par);
+
+    const size_t ndefgrad = static_cast<size_t>(nblock) * static_cast<size_t>(ndir + 2 * nshr);
+    const size_t nstress = static_cast<size_t>(nblock) * static_cast<size_t>(ndir + nshr);
+
+    std::vector<char> req;
+    req.reserve(sizeof(module_len) + module_len +
+                sizeof(nblock_i32) + sizeof(ndir_i32) + sizeof(nshr_i32) + sizeof(n_mat_par_i32) +
+                ndefgrad * sizeof(double) +
+                static_cast<size_t>(n_mat_par > 0 ? n_mat_par : 0) * sizeof(double));
+
+    abqnn::ipc::append_scalar(req, module_len);
+    abqnn::ipc::append_bytes(req, module_filename, module_len);
+    abqnn::ipc::append_scalar(req, nblock_i32);
+    abqnn::ipc::append_scalar(req, ndir_i32);
+    abqnn::ipc::append_scalar(req, nshr_i32);
+    abqnn::ipc::append_scalar(req, n_mat_par_i32);
+    abqnn::ipc::append_bytes(req, defgradF, ndefgrad * sizeof(double));
+    if (mat_par && n_mat_par > 0)
+    {
+        abqnn::ipc::append_bytes(req, mat_par, static_cast<size_t>(n_mat_par) * sizeof(double));
+    }
+
+    std::vector<char> resp;
+    int tx_err = abqnn::ipc::transact_blocking(kPipeName, ABQNN_MSG_VUMAT_REQ, req, ABQNN_MSG_VUMAT_RESP, resp);
+    if (tx_err != 0)
+    {
+        return tx_err;
+    }
+
+    size_t off = 0;
+    int32_t status = 0;
+    if (!abqnn::ipc::read_scalar(resp, off, status))
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+    if (status != 0)
+    {
+        return status;
+    }
+
+    int32_t resp_nblock = 0;
+    int32_t resp_ndir = 0;
+    int32_t resp_nshr = 0;
+    if (!abqnn::ipc::read_scalar(resp, off, resp_nblock) || !abqnn::ipc::read_scalar(resp, off, resp_ndir) || !abqnn::ipc::read_scalar(resp, off, resp_nshr))
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+
+    if (resp_nblock != nblock_i32 || resp_ndir != ndir_i32 || resp_nshr != nshr_i32)
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+
+    if (off + static_cast<size_t>(nblock) * sizeof(double) + nstress * sizeof(double) != resp.size())
+    {
+        return abqnn::ipc::ERR_IPC_PROTOCOL;
+    }
+
+    std::memcpy(enerInternNew, resp.data() + off, static_cast<size_t>(nblock) * sizeof(double));
+    off += static_cast<size_t>(nblock) * sizeof(double);
+    std::memcpy(stressNew, resp.data() + off, nstress * sizeof(double));
+
+    return 0;
 }

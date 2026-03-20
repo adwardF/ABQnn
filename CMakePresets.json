@@ -13,6 +13,8 @@
                 "ABAQUS_LIB_PATH": "D:\\SIMULIA\\EstProducts\\2021\\win_b64\\code\\lib",
                 "MODEL_PATH": "D:\\hresearch\\ABQnn\\models",
                 "LOG_PATH": "D:\\hresearch\\ABQnn\\log",
+                "ABQNN_UMAT_TORCH_DEVICE": "CPU",
+                "ABQNN_VUMAT_TORCH_DEVICE": "CUDA",
                 "ENABLE_DEBUG_OUTPUT": "ON"
             }
         }

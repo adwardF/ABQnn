@@ -5,38 +5,35 @@ src/CMakeLists.txt - Library Build Configuration
 PURPOSE: Defines how to build the two main libraries.
 
 LIBRARIES BUILT:
-  1. umat_pt_caller (SHARED/DLL)
-     - Links against LibTorch
-     - Loads and runs PyTorch models
-     - Exports: pt_module_invoke()
-
-  2. umat_auxlib (STATIC)
+    1. umat_auxlib (STATIC)
      - Linked into Abaqus UMAT
-     - Handles DLL loading at runtime
+         - Abaqus-facing IPC client bridge
      - Exports: invoke_pt() - called from Fortran
+
+    2. abqnn_inference_server (EXE)
+      - Links against LibTorch
+      - Runs Torch inference out-of-process
 ================================================================================
 ]]
 
 # -----------------------------------------------------------------------------
-# umat_pt_caller.dll - PyTorch model inference
+# abqnn_inference_server.exe - Torch inference server (out-of-process)
 # -----------------------------------------------------------------------------
-add_library(umat_pt_caller SHARED UMAT_pt_caller.cpp)
+add_executable(abqnn_inference_server ABQnn_inference_server.cpp abqnn_ipc_common.cpp)
 
-target_include_directories(umat_pt_caller PRIVATE
+target_include_directories(abqnn_inference_server PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_BINARY_DIR}/include
     ${LibTorch_INCLUDE_DIRS}
 )
 
-target_link_libraries(umat_pt_caller PRIVATE ${LibTorch_LIBRARIES})
+target_link_libraries(abqnn_inference_server PRIVATE ${LibTorch_LIBRARIES})
 
-target_compile_definitions(umat_pt_caller PRIVATE
-    UMAT_PT_CALLER_EXPORTS
+target_compile_definitions(abqnn_inference_server PRIVATE
     $<$<BOOL:${ENABLE_DEBUG_OUTPUT}>:ENABLE_DEBUG_OUTPUT>
 )
 
-# Precompiled headers to speed heavy Torch includes
-target_precompile_headers(umat_pt_caller PRIVATE
+target_precompile_headers(abqnn_inference_server PRIVATE
     <torch/torch.h>
     <torch/script.h>
 )
@@ -44,7 +41,7 @@ target_precompile_headers(umat_pt_caller PRIVATE
 # -----------------------------------------------------------------------------
 # umat_auxlib.lib - Static library for Abaqus linking
 # -----------------------------------------------------------------------------
-add_library(umat_auxlib STATIC UMAT_auxlib.cpp)
+add_library(umat_auxlib STATIC UMAT_auxlib.cpp abqnn_ipc_common.cpp)
 
 target_include_directories(umat_auxlib PRIVATE
     ${CMAKE_SOURCE_DIR}/include

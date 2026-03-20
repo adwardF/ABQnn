@@ -4,36 +4,18 @@ subroutine UMAT(STRESS,STATEV,DDSDDE,SSE,SPD,SCD, &
   &  NDI,NSHR,NTENS,NSTATV,PROPS,NPROPS,COORDS,DROT,PNEWDT, &
   &  CELENT,DFGRD0,DFGRD1,NOEL,NPT,LAYER,KSPT,JSTEP,KINC) 
 
-!***********************************************************************
-! ABQnn - Neural Network UMAT for Abaqus
-!
-! This subroutine interfaces with PyTorch TorchScript models to compute
-! hyperelastic material response for finite element analysis.
-!
-! Input:
-!   DFGRD1 - Deformation gradient at end of increment [3x3]
-!   CMNAME - Material name (used to locate .pt model file)
-!
-! Output:
-!   STRESS - Cauchy stress in Voigt notation [6]
-!   DDSDDE - Material tangent stiffness matrix [6x6]
-!   SSE    - Strain energy density
-!
-! Configuration (set at compile time via CMake):
-!   MODEL_PATH = @MODEL_PATH@
-!
-!***********************************************************************
-
     use iso_c_binding, only: c_int, c_double, c_char, c_null_char
 
     implicit none
 
     ! Interface for C function
     interface
-      function invoke_pt(ptname, F, psi, cauchy, C66) result(err) bind(C)
+      function invoke_pt(ptname, F, props, nprops, psi, cauchy, C66) result(err) bind(C)
         use iso_c_binding, only: c_int, c_double, c_char, c_null_char
         integer(c_int) :: err
         character(c_char), dimension(*) :: ptname
+        integer(c_int), value :: nprops
+        real(c_double), dimension(nprops) :: props
         real(c_double) :: psi
         real(c_double), dimension(3,3) :: F
         real(c_double), dimension(6) :: cauchy
@@ -60,7 +42,8 @@ subroutine UMAT(STRESS,STATEV,DDSDDE,SSE,SPD,SCD, &
     integer :: err
     
     err = invoke_pt(trim(CMNAME) // ".pt" // c_null_char, &
-                    DFGRD1, SSE, STRESS, DDSDDE)
+                  & DFGRD1, PROPS, NPROPS, & 
+                  & SSE, STRESS, DDSDDE)
 
     ! Check for errors
     if (err .ne. 0) then

@@ -22,7 +22,7 @@
 
 int main() {
     printf("ABQnn Load Test\n");
-    std::string module_filename_str("test_NH_3D.pt");
+    std::string module_filename_str("NH_3D.pt");
 
     // need to load torch_cuda.dll if using CUDA tensors
     // LoadLibraryExA("torch_cuda.dll", NULL, LOAD_WITH_ALTERED_SEARCH_PATH);

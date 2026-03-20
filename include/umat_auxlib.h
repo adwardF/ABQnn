@@ -8,14 +8,13 @@ extern "C" {
 /**
  * @brief Invoke a PyTorch model from Fortran UMAT
  * 
- * This function handles dynamic library loading and delegates to pt_module_invoke.
+ * This function is the Abaqus-facing IPC client entrypoint.
  * Thread-safe initialization is performed on first call.
- * The shapes of the input and output arrays depdend on the material model.
- * In all cases F is a 3x3 deformation gradient tensor
- * psi is a scalar strain energy
- * Plane stress: Cauchy: [3], DDSDDE: [3][3]
- * Plane strain: Cauchy: [4], DDSDDE: [4][4]
- * 3D stress: Cauchy: [6], DDSDDE: [6][6]
+ * The shape of F is fixed as 3x3, while output sizes are model-defined.
+ * In all cases F is a 3x3 deformation gradient tensor and psi is a scalar.
+ * Cauchy and DDSDDE are filled from server response payload exactly as produced
+ * by the TorchScript model (for example, 4 and 16 values for a 2D formulation,
+ * or 6 and 36 values for a 3D formulation).
  * 
  * @param module_filename Path to the .pt TorchScript model file
  * @param F Deformation gradient tensor [3][3] (input)
@@ -25,12 +24,17 @@ extern "C" {
  * @return int Error code (0 = success)
  * 
  * Error codes:
- *   0 - Success
- *   1 - Failed to set DLL directory
- *   2 - Failed to load UMAT_pt_caller.dll
- *   3 - Failed to get DLL handle
- *   4 - Failed to get function address
- *   Other codes from pt_module_invoke
+ *   0   - Success
+ *   101 - Failed to load model on server
+ *   102 - Failed to insert model into server cache
+ *   105 - Server inference or conversion error
+ *   110 - Invalid input parameters
+ *   111 - Unsupported tensor layout/shape mismatch
+ *   112 - CUDA requested but unavailable on server
+ *   120 - IPC connect error
+ *   121 - IPC write error
+ *   122 - IPC read error
+ *   123 - IPC protocol error
  */
 int invoke_pt(
     const char* module_filename,
@@ -40,6 +44,27 @@ int invoke_pt(
     double* psi,
     double* Cauchy,
     double* DDSDDE
+);
+
+/**
+ * @brief Invoke a PyTorch model from Fortran VUMAT with a batch of material points.
+ *
+ * The deformation gradient and stress arrays are passed in Fortran layout:
+ *   - defgradF(nblock, ndir+2*nshr)
+ *   - stressNew(nblock, ndir+nshr)
+ *
+ * @return int Error code (0 = success)
+ */
+int invoke_pt_vumat_batch(
+    const char* module_filename,
+    const double* defgradF,
+    int nblock,
+    int ndir,
+    int nshr,
+    const double* mat_par,
+    int n_mat_par,
+    double* enerInternNew,
+    double* stressNew
 );
 
 #ifdef __cplusplus

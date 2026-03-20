@@ -27,6 +27,19 @@ WHAT IT DOES:
 option(BUILD_TESTS "Build test executables" ON)
 option(ENABLE_DEBUG_OUTPUT "Enable debug output to log files" OFF)
 option(USE_SCCACHE "Use sccache to accelerate compilation if available" ON)
+set(ABQNN_UMAT_TORCH_DEVICE "CPU" CACHE STRING "Torch inference device for UMAT requests (CPU or CUDA)")
+set(ABQNN_VUMAT_TORCH_DEVICE "CPU" CACHE STRING "Torch inference device for VUMAT requests (CPU or CUDA)")
+set_property(CACHE ABQNN_UMAT_TORCH_DEVICE PROPERTY STRINGS CPU CUDA)
+set_property(CACHE ABQNN_VUMAT_TORCH_DEVICE PROPERTY STRINGS CPU CUDA)
+
+string(TOUPPER "${ABQNN_UMAT_TORCH_DEVICE}" ABQNN_UMAT_TORCH_DEVICE)
+string(TOUPPER "${ABQNN_VUMAT_TORCH_DEVICE}" ABQNN_VUMAT_TORCH_DEVICE)
+if(NOT ABQNN_UMAT_TORCH_DEVICE STREQUAL "CPU" AND NOT ABQNN_UMAT_TORCH_DEVICE STREQUAL "CUDA")
+    message(FATAL_ERROR "ABQNN_UMAT_TORCH_DEVICE must be CPU or CUDA (got: ${ABQNN_UMAT_TORCH_DEVICE})")
+endif()
+if(NOT ABQNN_VUMAT_TORCH_DEVICE STREQUAL "CPU" AND NOT ABQNN_VUMAT_TORCH_DEVICE STREQUAL "CUDA")
+    message(FATAL_ERROR "ABQNN_VUMAT_TORCH_DEVICE must be CPU or CUDA (got: ${ABQNN_VUMAT_TORCH_DEVICE})")
+endif()
 
 # C++ configuration
 set(CMAKE_CXX_STANDARD 17)
@@ -42,6 +55,8 @@ if(WIN32)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS -DNOMINMAX)
     # Enable MSVC parallel compilation across translation units
     add_compile_options($<$<CXX_COMPILER_ID:MSVC>:/MP>)
+else()
+    message(FATAL_ERROR "ABQnn currently supports Windows only. Non-Windows IPC backends are not implemented yet.")
 endif()
 
 # Output directories
@@ -97,12 +112,12 @@ if(USE_SCCACHE)
     endif()
 endif()
 
-# Fortran UMAT file
-configure_file(
-    ${CMAKE_SOURCE_DIR}/fortran/UMAT_base.for.in
-    ${CMAKE_BINARY_DIR}/fortran/UMAT_base.for
-    @ONLY
-)
+# # Fortran UMAT file
+# configure_file(
+#     ${CMAKE_SOURCE_DIR}/fortran/UMAT_base.for.in
+#     ${CMAKE_BINARY_DIR}/fortran/UMAT_base.for
+#     @ONLY
+# )
 
 # -----------------------------------------------------------------------------
 # Build Libraries
@@ -126,9 +141,6 @@ include(GNUInstallDirs)
 if(ABAQUS_LIB_PATH)
     install(TARGETS umat_auxlib ARCHIVE DESTINATION ${ABAQUS_LIB_PATH})
 endif()
-if(LIBTORCH_LIB_PATH)
-    install(TARGETS umat_pt_caller RUNTIME DESTINATION ${LIBTORCH_LIB_PATH})
-endif()
 
 # -----------------------------------------------------------------------------
 # Build Summary
@@ -138,5 +150,7 @@ message(STATUS "=== ABQnn Configuration ===")
 message(STATUS "  LIBTORCH_PATH:    ${LIBTORCH_PATH}")
 message(STATUS "  MODEL_PATH:       ${MODEL_PATH}")
 message(STATUS "  LOG_PATH:         ${LOG_PATH}")
+message(STATUS "  UMAT device:      ${ABQNN_UMAT_TORCH_DEVICE}")
+message(STATUS "  VUMAT device:     ${ABQNN_VUMAT_TORCH_DEVICE}")
 message(STATUS "  Debug output:     ${ENABLE_DEBUG_OUTPUT}")
 message(STATUS "")
