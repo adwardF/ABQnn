@@ -54,12 +54,44 @@ static int validate_inference_devices()
     const bool umat_wants_cuda = std::strcmp(ABQNN_UMAT_TORCH_DEVICE, "CUDA") == 0;
     const bool vumat_wants_cuda = std::strcmp(ABQNN_VUMAT_TORCH_DEVICE, "CUDA") == 0;
 
-    if ((umat_wants_cuda || vumat_wants_cuda) && !torch::cuda::is_available())
+    if ((umat_wants_cuda || vumat_wants_cuda))
     {
+        // Due to some reasons, we need to first load torch_cuda.dll manually 
+        // before any CUDA-related API is called
+        std::wstring dll_path_w = std::filesystem::path(ABQNN_LIBTORCH_LIB_PATH).wstring();
+        LPCWSTR dll_path = dll_path_w.c_str();
+        if(!AddDllDirectory(dll_path))
+        {
+            DWORD err = GetLastError();
 #ifdef ENABLE_DEBUG_OUTPUT
-        std::fprintf(stderr, "server: CUDA requested but CUDA is not available\n");
+            std::fprintf(stderr, "server: warning: failed to add %ls to DLL search path (%lu), CUDA inference may not work\n", dll_path, err);
 #endif
-        return 112;
+        }
+        if(!LoadLibraryEx("torch_cuda.dll", NULL, LOAD_LIBRARY_SEARCH_USER_DIRS))
+        {
+            DWORD err = GetLastError();
+#ifdef ENABLE_DEBUG_OUTPUT
+            std::fprintf(stderr, "server: warning: failed to load torch_cuda.dll (%lu), CUDA inference will not work\n", err);
+#endif
+        }
+        else
+        {
+#ifdef ENABLE_DEBUG_OUTPUT
+            std::fprintf(stderr, "server: successfully loaded torch_cuda.dll\n");
+#endif
+        }
+
+        if(torch::cuda::is_available())
+        {
+            return 0;
+        }
+        else
+        {
+#ifdef ENABLE_DEBUG_OUTPUT
+            std::fprintf(stderr, "server: CUDA requested but CUDA is not available\n");
+#endif
+            return 112;
+        }
     }
     return 0;
 }
@@ -463,22 +495,6 @@ int main()
     std::fprintf(stderr, "ABQnn UMAT device: %s\n", ABQNN_UMAT_TORCH_DEVICE);
     std::fprintf(stderr, "ABQnn VUMAT device: %s\n", ABQNN_VUMAT_TORCH_DEVICE);
 #endif
-
-    // Due to some reasons, we need to first load torch_cuda.dll manually 
-    // before any CUDA-related API is called
-    if(!LoadLibraryEx("torch_cuda.dll", NULL, LOAD_WITH_ALTERED_SEARCH_PATH))
-    {
-        DWORD err = GetLastError();
-#ifdef ENABLE_DEBUG_OUTPUT
-        std::fprintf(stderr, "server: warning: failed to load torch_cuda.dll (%lu), CUDA inference will not work\n", err);
-#endif
-    }
-    else
-    {
-#ifdef ENABLE_DEBUG_OUTPUT
-        std::fprintf(stderr, "server: successfully loaded torch_cuda.dll\n");
-#endif
-    }
 
     int device_err = validate_inference_devices();
     if (device_err != 0)
